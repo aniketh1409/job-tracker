@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from models import Application
-from schemas import ApplicationCreate, ApplicationUpdate
+from .models import Application
+from .schemas import ApplicationCreate, ApplicationUpdate
 
 def create_application(db: Session, payload: ApplicationCreate) -> Application:
     app = Application(**payload.model_dump())

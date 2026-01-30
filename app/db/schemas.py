@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from pydantic import BaseModel, Field
-from app.db.models import AppStatus
+from ..db.models import AppStatus
 
 class ApplicationCreate(BaseModel):
     company: str = Field(min_length=1, max_length=120)

@@ -4,4 +4,4 @@ instance/
 .env 
 .env.*
 .venv/
-.venv3/    
+.venv3/   
