@@ -1,8 +1,239 @@
 <!doctype html>
 <html>
-  <body>
-    <h1>Job Tracker UI</h1>
-    <p>If you see this, / is working.</p>
-    <p>Go to <a href="/docs">/docs</a> for the API.</p>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Job Tracker</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; max-width: 1100px; }
+    h1 { margin: 0 0 12px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
+    input, select, button, textarea { padding: 8px; font-size: 14px; }
+    textarea { width: 100%; height: 60px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    th, td { border-bottom: 1px solid #ddd; padding: 10px; vertical-align: top; }
+    th { text-align: left; }
+    .muted { color: #666; font-size: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <h1>Job Tracker</h1>
+  <div class="muted">FastAPI + Postgres. Add jobs, update status, filter, and view next actions.</div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">Add application</h3>
+    <div class="row">
+      <div>
+        <div class="muted">Company</div>
+        <input id="company" placeholder="Resolver" />
+      </div>
+      <div style="flex:1; min-width: 220px;">
+        <div class="muted">Role</div>
+        <input id="role" placeholder="QA Automation Co-op" style="width:100%;" />
+      </div>
+      <div>
+        <div class="muted">Status</div>
+        <select id="status">
+          <option value="applied">applied</option>
+          <option value="oa">oa</option>
+          <option value="interview">interview</option>
+          <option value="offer">offer</option>
+          <option value="rejected">rejected</option>
+          <option value="withdrawn">withdrawn</option>
+        </select>
+      </div>
+      <div>
+        <div class="muted">Date applied</div>
+        <input id="date_applied" type="date" />
+      </div>
+      <div>
+        <button onclick="createApp()">Add</button>
+      </div>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="muted">Notes</div>
+      <textarea id="notes" placeholder="Follow up in a week..."></textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <div class="muted">Filter status</div>
+        <select id="filter_status" onchange="loadApps()">
+          <option value="">(all)</option>
+          <option value="applied">applied</option>
+          <option value="oa">oa</option>
+          <option value="interview">interview</option>
+          <option value="offer">offer</option>
+          <option value="rejected">rejected</option>
+          <option value="withdrawn">withdrawn</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width: 220px;">
+        <div class="muted">Search company</div>
+        <input id="filter_company" placeholder="e.g., Resol" oninput="debouncedLoad()" style="width:100%;" />
+      </div>
+      <div>
+        <button onclick="loadApps()">Refresh</button>
+      </div>
+      <div style="margin-left:auto;">
+        <button onclick="loadNext()">Next actions</button>
+      </div>
+    </div>
+
+    <div id="nextBox" style="margin-top:12px;"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Company / Role</th>
+          <th>Status</th>
+          <th>Dates</th>
+          <th>Notes</th>
+          <th>Update</th>
+        </tr>
+      </thead>
+      <tbody id="appsBody"></tbody>
+    </table>
+  </div>
+
+<script>
+let debounceTimer = null;
+function debouncedLoad() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(loadApps, 250);
+}
+
+async function loadApps() {
+  const status = document.getElementById("filter_status").value;
+  const company = document.getElementById("filter_company").value.trim();
+
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (company) params.set("company", company);
+
+  const res = await fetch("/applications" + (params.toString() ? "?" + params.toString() : ""));
+  const data = await res.json();
+
+  const body = document.getElementById("appsBody");
+  body.innerHTML = "";
+
+  data.forEach(app => {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td>
+        <b>${escapeHtml(app.company)}</b><br/>
+        ${escapeHtml(app.role)}
+      </td>
+      <td>
+        <select id="status_${app.id}">
+          ${["applied","oa","interview","offer","rejected","withdrawn"].map(s =>
+            `<option value="${s}" ${app.status===s ? "selected":""}>${s}</option>`
+          ).join("")}
+        </select>
+      </td>
+      <td class="muted">
+        applied: ${app.date_applied ?? "-"}<br/>
+        contacted: ${app.last_contacted ?? "-"}
+      </td>
+      <td>
+        <textarea id="notes_${app.id}">${escapeHtml(app.notes ?? "")}</textarea>
+      </td>
+      <td>
+        <button onclick="updateApp(${app.id})">Save</button>
+      </td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+async function createApp() {
+  const payload = {
+    company: document.getElementById("company").value.trim(),
+    role: document.getElementById("role").value.trim(),
+    status: document.getElementById("status").value,
+    date_applied: document.getElementById("date_applied").value || null,
+    notes: document.getElementById("notes").value || null
+  };
+
+  if (!payload.company || !payload.role) {
+    alert("Company and role are required.");
+    return;
+  }
+
+  const res = await fetch("/applications", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    alert("Error: " + JSON.stringify(err));
+    return;
+  }
+
+  document.getElementById("company").value = "";
+  document.getElementById("role").value = "";
+  document.getElementById("notes").value = "";
+
+  await loadApps();
+}
+
+async function updateApp(id) {
+  const payload = {
+    status: document.getElementById(`status_${id}`).value,
+    notes: document.getElementById(`notes_${id}`).value,
+    last_contacted: new Date().toISOString().slice(0,10)
+  };
+
+  const res = await fetch(`/applications/${id}`, {
+    method: "PATCH",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    alert("Error: " + JSON.stringify(err));
+    return;
+  }
+  await loadApps();
+}
+
+async function loadNext() {
+  const res = await fetch("/applications/next");
+  const data = await res.json();
+
+  const box = document.getElementById("nextBox");
+  box.innerHTML = `
+    <div class="row">
+      <div class="card" style="flex:1;">
+        <b>Follow-ups</b>
+        <div class="muted">${(data.followups?.length ? "" : "None 🎉")}</div>
+        <ul>${(data.followups||[]).map(x => `<li>${escapeHtml(x.company)} — ${escapeHtml(x.role)} (${x.status})</li>`).join("")}</ul>
+      </div>
+      <div class="card" style="flex:1;">
+        <b>Interviews</b>
+        <div class="muted">${(data.interviews?.length ? "" : "None")}</div>
+        <ul>${(data.interviews||[]).map(x => `<li>${escapeHtml(x.company)} — ${escapeHtml(x.role)} (${x.status})</li>`).join("")}</ul>
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(s) {
+  return (s ?? "").toString()
+    .replaceAll("&","&amp;").replaceAll("<","&lt;")
+    .replaceAll(">","&gt;").replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+loadApps();
+</script>
+</body>
 </html>
+
